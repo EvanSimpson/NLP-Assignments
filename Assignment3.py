@@ -10,7 +10,10 @@ import json
 import codecs
 
 class FileIterator:
-
+	'''
+	Used for iterating over a pair of files together, one line at a time.
+	Implements pythons iterator interface.
+	'''
 	def __init__ (self, enFile, esFile):
 		self.en = codecs.open(enFile, 'r', encoding='utf-8')
 		self.es = codecs.open(esFile, 'r', encoding='utf-8')
@@ -33,13 +36,14 @@ class FileIterator:
 		self.es.seek(0)
 
 
-###############################################################################
-###############################################################################
-###############################################################################
 
 
 class Translator:
 
+	'''
+	Contains training files, files to be analyzed, output file, 
+	 the translation model to be used, and precomputed parameters.
+	'''
 	def __init__(self, teFile, tfFile, eFile, fFile, outFile, model, paramFile=""):
 		self.eFile = eFile
 		self.fFile = fFile
@@ -52,6 +56,9 @@ class Translator:
 		else:
 			self.algorithm = IBM2(FileIterator(teFile, tfFile), FileIterator(eFile, fFile), 5, self.parameters)
 		
+	'''
+	If parameters are supplied, import them. Saves lots of time.
+	'''	
 	def importParams(self):
 		print self.paramFile
 		if self.paramFile == "":
@@ -64,24 +71,33 @@ class Translator:
 					params.update({tuple(data[0]): data[1]})
 			return params
 
+	'''
+	Use the chosen model to estimate q and or t parameters.
+	'''
 	def countParameters(self):
 		self.algorithm.paramEstimator()
 
+	'''
+	Use the chosen model to translate the test files. Get alignments in return.
+	'''
 	def translate(self):
 		self.alignments = self.algorithm.translate()
 
+	'''
+	Write the alignments to the output file in the required format.
+	'''
 	def writeAlignment(self):
 		with open(self.outFile, 'w') as z:
 			for alignment in self.alignments:
 				z.write("%d %d %d" %(alignment[0],alignment[1],alignment[2])+'\n')
 
 
-###############################################################################
-###############################################################################
-###############################################################################
 
 
 class keydefaultdict(defaultdict):
+	'''
+	Custom defaultdict that passes key into default function.
+	'''
     def __missing__(self, key):
         if self.default_factory is None:
             raise KeyError( key )
@@ -90,13 +106,12 @@ class keydefaultdict(defaultdict):
             return ret
 
 
-###############################################################################
-###############################################################################
-###############################################################################
 
 
 class IBM1:
-
+	'''
+	Contains iterator over training and test files, number of iterations for estimation, and parameters.
+	'''
 	def __init__(self, tIterator, oIterator, iters, parameters):
 		self.trainIterator = tIterator
 		self.transIterator = oIterator
@@ -112,6 +127,9 @@ class IBM1:
 			print "Done initializing parameters."
 		self.alignments = []
 
+	'''
+	Set the initial value of all t parameters.
+	'''
 	def initializeParameters(self):
 		parameters = keydefaultdict(lambda e: 1.0/len(self.ewords[e[0]]))
 		for pair in self.trainIterator:
@@ -120,13 +138,19 @@ class IBM1:
 					self.ewords[j].add(i)
 		return parameters
 
-	def sigma(self, i, j, eSentence, fSentence):
+	'''
+	Calculate the delta from last iteration.
+	'''
+	def delta(self, i, j, eSentence, fSentence):
 		num = self.parameters[(eSentence[j], fSentence[i])]
 		denom = 0.0
 		for l in range(len(eSentence)):
 			denom += self.parameters[(eSentence[l], fSentence[i])]
 		return num/denom
 
+	'''
+	Estimate the parameters of the model.
+	'''
 	def paramEstimator(self):
 		print "Estimating parameters..."
 		for c in range(self.iterations):
@@ -137,7 +161,7 @@ class IBM1:
 				fSentence = pair[1]
 				for i in range(len(fSentence)):
 					for j in range(len(eSentence)):	
-						s = self.sigma(i,j,eSentence,fSentence)
+						s = self.delta(i,j,eSentence,fSentence)
 						counts[(eSentence[j], fSentence[i])] += s
 						counts[(eSentence[j], "TOTAL_COUNTS")] += s
 			self.trainIterator.reset()
@@ -146,6 +170,9 @@ class IBM1:
 					self.parameters[pair] = counts[pair]/(counts[(pair[0], "TOTAL_COUNTS")]*1.0)
 		print "Done estimating parameters."
 
+	'''
+	Write the parameters to a file for use later.
+	'''
 	def exportParameters(self):
 		print "Writing parameters to file..."
 		with open("parameters.txt", 'w') as z:
@@ -153,6 +180,9 @@ class IBM1:
 				z.write(json.dumps(param) + '\n')
 		print "Done writing parameters to file."
 
+	'''
+	Find the alignments between the test files.
+	'''
 	def translate(self):
 		print "Beginning translation..."
 		if self.export:
@@ -172,12 +202,11 @@ class IBM1:
 		self.alignments.sort()
 		return self.alignments
 
-###############################################################################
-###############################################################################
-###############################################################################
 
 class IBM2:
-
+	'''
+	Contains iterator over training and test files, number of iterations for estimation, and parameters.
+	'''
 	def __init__(self, tIterator, oIterator, iters, parameters):
 		self.trainIterator = tIterator
 		self.transIterator = oIterator
@@ -195,6 +224,9 @@ class IBM2:
 			print "Done initializing parameters."
 		self.alignments = []
 
+	'''
+	Set the initial value of all t parameters.
+	'''
 	def initializeParameters(self):
 		parameters = keydefaultdict(lambda e: 1.0/len(self.ewords[e[0]]))
 		for pair in self.trainIterator:
@@ -203,13 +235,19 @@ class IBM2:
 					self.ewords[j].add(i)
 		return parameters
 
-	def sigma(self, i, j, eSentence, fSentence):
+	'''
+	Calculate the delta from last iteration.
+	'''
+	def delta(self, i, j, eSentence, fSentence):
 		num = self.parameters[(eSentence[j], fSentence[i])] * self.q[(j, i, len(eSentence), len(fSentence))]
 		denom = 0.0
 		for l in range(len(eSentence)):
 			denom += (self.parameters[(eSentence[l], fSentence[i])] * self.q[(l, i, len(eSentence), len(fSentence))])
 		return num/denom
 
+	'''
+	Estimate the parameters of the model.
+	'''
 	def paramEstimator(self):
 		print "Estimating parameters..."
 		for c in range(self.iterations):
@@ -222,7 +260,7 @@ class IBM2:
 				fSentence = pair[1]
 				for i in range(len(fSentence)):
 					for j in range(len(eSentence)):	
-						s = self.sigma(i,j,eSentence,fSentence)
+						s = self.delta(i,j,eSentence,fSentence)
 						counts[(eSentence[j], fSentence[i])] += s
 						counts[(eSentence[j], "TOTAL_COUNTS")] += s
 						qCounts[(j,i,len(eSentence), len(fSentence))] += s
@@ -237,6 +275,9 @@ class IBM2:
 		if self.export:
 			self.exportParameters()
 
+	'''
+	Write the parameters to a file for use later.
+	'''
 	def exportParameters(self):
 		print "Writing parameters to file..."
 		with open("parameters2.txt", 'w') as z:
@@ -247,6 +288,9 @@ class IBM2:
 				z.write(json.dumps(q) + '\n')
 		print "Done writing parameters to file."
 
+	'''
+	Find the alignments between the test files.
+	'''
 	def translate(self):
 		print "Beginning translation..."
 		count = 1
@@ -264,9 +308,6 @@ class IBM2:
 		return self.alignments
 
 
-###############################################################################
-###############################################################################
-###############################################################################
 
 if __name__ == '__main__':
 	#trans = Translator('corpus.en', 'corpus.es', 'test.en', 'test.es', 'alignment_test.p1.out', 1)
